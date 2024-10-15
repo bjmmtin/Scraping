@@ -1,72 +1,120 @@
 import asyncio
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, ElementHandle
+import json
+import pandas as pd  # type: ignore
+
+async def get_parent(element: ElementHandle, nth: int):
+    if element:
+        current_element = element
+        for i in range(nth):
+            current_element = await current_element.evaluate_handle("el => el.parentElement")
+            if current_element is None:
+                print(f"{nth}th Element not found at level {i + 1}")
+                return None
+        return current_element
+    else:
+        print("Provided element is None.")
+        return None
 
 async def scrape_ads_library():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)  # Set headless=True for no UI
+        browser = await p.chromium.launch(headless=False)
         page = await browser.new_page()
 
-        # Intercept network requests
         await page.route("**/ads/library/**", lambda route: route.continue_())
 
         try:
-            # Navigate to the Facebook Ads Library
             await page.goto("https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&media_type=all&search_type=page&view_all_page_id=106091695497460", timeout=60000)
+            await page.wait_for_timeout(5000)
 
-            # Wait for the page to load
-            await page.wait_for_timeout(5000)  # Adjust based on your internet speed
-
-            all_ad_blocks = await page.query_selector_all(".xh8yej3") 
+            all_ad_blocks = await page.query_selector_all(".xh8yej3")
+            ads_data = []
 
             for ad_block in all_ad_blocks:
-                ad_elements_infos = await ad_block.query_selector_all(".x8t9es0.xw23nyj.xo1l8bm.x63nzvj.x108nfp6.xq9mrsl.x1h4wwuj.xeuugli") 
-                for ad in ad_elements_infos:
-                    ad_info = await ad.inner_text()
-                    print("Ad Title (CSS):", ad_info)
+                ad_info = {}
+                see_detail_element = await ad_block.query_selector("text='See ad details'")  
                 
-                # Use query_selector instead of locator
-                element = await ad_block.query_selector("text='See ad details'")  # Corrected here
-                
-                if element:  # Check if the element exists
-                    print(f"Found element with the text 'See ad details'.")
-                    await element.click()
-                    await page.wait_for_timeout(2000)  # Wait for the modal to open
+                if see_detail_element:
+                    print("Found element with the text 'See ad details'.")
+                    await see_detail_element.click()
+                    await page.wait_for_timeout(5000)
 
-                    # Wait for the modal to be visible using its class
-                    modal = await page.wait_for_selector(".x1qjc9v5.x9f619.x78zum5.xdt5ytf.x1nhvcw1.xg6iff7.xurb0ha.x1sxyh0.x1l90r2v")
+                    element = await page.query_selector("text='Ad Details'")
+                    modal_element = await get_parent(element, 9)
 
-                    # Close the modal
-                    await page.click("text='Close'")  # Use the text selector for the close button
-                    await page.wait_for_timeout(1000)  # Wait for the modal to close
+                    if modal_element:
+                        library_id_element = await modal_element.query_selector("text='Platforms'")
+                        basic_info_parent = await get_parent(library_id_element, 2)
+                        if basic_info_parent:
+                            basic_info = await basic_info_parent.inner_text()
+                            ad_info['basic_info'] = basic_info.strip()
+                            print("Basic info:", ad_info['basic_info'])
+                        
+                        element = await modal_element.query_selector("text='About the advertiser'")
+                        about_advertiser = await get_parent(element, 2)
+                        if about_advertiser:
+                            await about_advertiser.click()
+                            await page.wait_for_timeout(500)
+                            element = await modal_element.query_selector("text='More info'")
+                            more_info = await get_parent(element, 2)
+                            if more_info:
+                                info_text = await more_info.inner_text()
+                                ad_info['about_advertiser'] = info_text.strip()
+                                print("About the advertiser:", ad_info['about_advertiser'])
 
-            # Print the page title
-            print("Page Title:", await page.title())
+                            await about_advertiser.click()
+                            await page.wait_for_timeout(500)
 
-            # Take a screenshot
-            await page.screenshot(path="screenshot.png", full_page=True)
+                        element = await modal_element.query_selector("text='Beneficiary and payer'")
+                        beneficiary_and_payer = await get_parent(element, 2)
+                        if beneficiary_and_payer:
+                            await beneficiary_and_payer.click()
+                            await page.wait_for_timeout(500)
+                            # Get the next sibling element
+                            next_sibling_handle = await beneficiary_and_payer.evaluate_handle("el => el.nextElementSibling")
 
-            # Capture network responses
-            async def handle_response(response):
-                if "ads/library" in response.url:
-                    try:
-                        data = await response.json()
-                        print(data)  # Process the data as needed
-                    except Exception as e:
-                        print("Error processing response:", e)
+                            if next_sibling_handle:
+                                # Get the text of the next sibling using evaluate
+                                sibling_text = await next_sibling_handle.evaluate("el => el.innerText")
+                                ad_info['beneficiary_and_payer'] = sibling_text.strip()
+                                print("Beneficiary and payer:", ad_info['beneficiary_and_payer'])
+                            else:
+                                print("No next sibling found.")
+                            await beneficiary_and_payer.click()
+                            await page.wait_for_timeout(500)
 
-            page.on("response", handle_response)
+                        element = await modal_element.query_selector("text='European Union transparency'")
+                        european_union_transparency = await get_parent(element, 2)
+                        if european_union_transparency:
+                            await european_union_transparency.click()
+                            await page.wait_for_timeout(500)
+                            # Get the next sibling element
+                            next_sibling_handle = await european_union_transparency.evaluate_handle("el => el.nextElementSibling")
 
-            # Optionally, click to load more ads (uncomment and adjust selector if needed)
-            # await page.click("selector-for-load-more-button")
+                            if next_sibling_handle:
+                                # Get the text of the next sibling using evaluate
+                                sibling_text = await next_sibling_handle.evaluate("el => el.innerText")
+                                ad_info['european_union_transparency'] = sibling_text.strip()
+                                print("European Union Transparency:", ad_info['european_union_transparency'])
+                            else:
+                                print("No next sibling found.")
+                            await european_union_transparency.click()
+                            await page.wait_for_timeout(500)
 
-            # Wait for some time to gather data
-            await page.wait_for_timeout(10000)  # Adjust as needed
 
-        except Exception as e:
-            print("An error occurred:", e)
+                    await page.click("text='Close'")
+                    await page.wait_for_timeout(1000)
+
+                    # Append the ad_info dictionary to ads_data
+                    ads_data.append(ad_info)
 
         finally:
             await browser.close()
 
-if __name__ == "__main__":
-    asyncio.run(scrape_ads_library())
+    # Convert ads_data to DataFrame and save to .psv
+    df = pd.DataFrame(ads_data)
+    df.to_csv("ads_data.psv", sep='|', index=False)
+    print("Data saved to ads_data.psv")
+
+# Run the scraping function
+asyncio.run(scrape_ads_library())
