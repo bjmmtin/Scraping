@@ -1,5 +1,4 @@
 import asyncio
-import re
 from playwright.async_api import async_playwright
 
 async def scrape_ads_library():
@@ -17,29 +16,28 @@ async def scrape_ads_library():
             # Wait for the page to load
             await page.wait_for_timeout(5000)  # Adjust based on your internet speed
 
-            # Locate all elements containing the text "See summary details"
-            elements = page.locator("text='See summary details'")  # Use locator instead of get_by_text
+            all_ad_blocks = await page.query_selector_all(".xh8yej3") 
 
-            # Get the count of elements found
-            count = await elements.count()
-            print(f"Found {count} elements with the text 'See summary details'.")
+            for ad_block in all_ad_blocks:
+                ad_elements_infos = await ad_block.query_selector_all(".x8t9es0.xw23nyj.xo1l8bm.x63nzvj.x108nfp6.xq9mrsl.x1h4wwuj.xeuugli") 
+                for ad in ad_elements_infos:
+                    ad_info = await ad.inner_text()
+                    print("Ad Title (CSS):", ad_info)
+                
+                # Use query_selector instead of locator
+                element = await ad_block.query_selector("text='See ad details'")  # Corrected here
+                
+                if element:  # Check if the element exists
+                    print(f"Found element with the text 'See ad details'.")
+                    await element.click()
+                    await page.wait_for_timeout(2000)  # Wait for the modal to open
 
-            # Iterate through the elements
-            for i in range(count):
-                element_text = await elements.nth(i).inner_text()
-                print(f"Element {i + 1}: {element_text}")
+                    # Wait for the modal to be visible using its class
+                    modal = await page.wait_for_selector(".x1qjc9v5.x9f619.x78zum5.xdt5ytf.x1nhvcw1.xg6iff7.xurb0ha.x1sxyh0.x1l90r2v")
 
-            # Locate all elements containing the text "See ad details"
-            elements = page.locator("text='See ad details'")  # Use locator instead of get_by_text
-
-            # Get the count of elements found
-            count = await elements.count()
-            print(f"Found {count} elements with the text 'See ad details'.")
-
-            # Iterate through the elements
-            for i in range(count):
-                element_text = await elements.nth(i).inner_text()
-                print(f"Element {i + 1}: {element_text}")
+                    # Close the modal
+                    await page.click("text='Close'")  # Use the text selector for the close button
+                    await page.wait_for_timeout(1000)  # Wait for the modal to close
 
             # Print the page title
             print("Page Title:", await page.title())
