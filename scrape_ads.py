@@ -1,6 +1,5 @@
 import asyncio
 from playwright.async_api import async_playwright, ElementHandle
-import json
 import pandas as pd  # type: ignore
 
 async def get_parent(element: ElementHandle, nth: int):
@@ -16,7 +15,7 @@ async def get_parent(element: ElementHandle, nth: int):
         print("Provided element is None.")
         return None
 
-async def scrape_ads_library():
+async def scrape_ads_library(url: str):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False)
         page = await browser.new_page()
@@ -24,7 +23,7 @@ async def scrape_ads_library():
         await page.route("**/ads/library/**", lambda route: route.continue_())
 
         try:
-            await page.goto("https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&media_type=all&search_type=page&view_all_page_id=106091695497460", timeout=60000)
+            await page.goto(url, timeout=60000)
             await page.wait_for_timeout(5000)
 
             all_ad_blocks = await page.query_selector_all(".xh8yej3")
@@ -43,6 +42,7 @@ async def scrape_ads_library():
                     modal_element = await get_parent(element, 9)
 
                     if modal_element:
+                        # Extracting basic info
                         library_id_element = await modal_element.query_selector("text='Platforms'")
                         basic_info_parent = await get_parent(library_id_element, 2)
                         if basic_info_parent:
@@ -50,6 +50,7 @@ async def scrape_ads_library():
                             ad_info['basic_info'] = basic_info.strip()
                             print("Basic info:", ad_info['basic_info'])
                         
+                        # Extracting about the advertiser
                         element = await modal_element.query_selector("text='About the advertiser'")
                         about_advertiser = await get_parent(element, 2)
                         if about_advertiser:
@@ -62,59 +63,47 @@ async def scrape_ads_library():
                                 ad_info['about_advertiser'] = info_text.strip()
                                 print("About the advertiser:", ad_info['about_advertiser'])
 
-                            await about_advertiser.click()
-                            await page.wait_for_timeout(500)
-
+                        # Extracting beneficiary and payer
                         element = await modal_element.query_selector("text='Beneficiary and payer'")
                         beneficiary_and_payer = await get_parent(element, 2)
                         if beneficiary_and_payer:
                             await beneficiary_and_payer.click()
                             await page.wait_for_timeout(500)
-                            # Get the next sibling element
                             next_sibling_handle = await beneficiary_and_payer.evaluate_handle("el => el.nextElementSibling")
 
                             if next_sibling_handle:
-                                # Get the text of the next sibling using evaluate
                                 sibling_text = await next_sibling_handle.evaluate("el => el.innerText")
                                 ad_info['beneficiary_and_payer'] = sibling_text.strip()
                                 print("Beneficiary and payer:", ad_info['beneficiary_and_payer'])
-                            else:
-                                print("No next sibling found.")
-                            await beneficiary_and_payer.click()
-                            await page.wait_for_timeout(500)
 
+                        # Extracting European Union transparency
                         element = await modal_element.query_selector("text='European Union transparency'")
                         european_union_transparency = await get_parent(element, 2)
                         if european_union_transparency:
                             await european_union_transparency.click()
                             await page.wait_for_timeout(500)
-                            # Get the next sibling element
                             next_sibling_handle = await european_union_transparency.evaluate_handle("el => el.nextElementSibling")
 
                             if next_sibling_handle:
-                                # Get the text of the next sibling using evaluate
                                 sibling_text = await next_sibling_handle.evaluate("el => el.innerText")
                                 ad_info['european_union_transparency'] = sibling_text.strip()
                                 print("European Union Transparency:", ad_info['european_union_transparency'])
-                            else:
-                                print("No next sibling found.")
-                            await european_union_transparency.click()
-                            await page.wait_for_timeout(500)
 
+                    ads_data.append(ad_info)  # Append ad info to the list
+                    await page.click("text='Close'")  # Close the modal after scraping
 
-                    await page.click("text='Close'")
-                    await page.wait_for_timeout(1000)
+            # Save the ads data to a CSV file
+            df = pd.DataFrame(ads_data)
+            df.to_csv('scraped_ads_data.csv', index=False)
+            print("Data saved to scraped_ads_data.csv")
 
-                    # Append the ad_info dictionary to ads_data
-                    ads_data.append(ad_info)
-
+        except Exception as e:
+            print(f"An error occurred: {e}")
         finally:
             await browser.close()
 
-    # Convert ads_data to DataFrame and save to .psv
-    df = pd.DataFrame(ads_data)
-    df.to_csv("ads_data.psv", sep='|', index=False)
-    print("Data saved to ads_data.psv")
+# Get URL input from the user
+url = input("Please enter the URL to scrape: ")
 
 # Run the scraping function
-asyncio.run(scrape_ads_library())
+asyncio.run(scrape_ads_library(url))
